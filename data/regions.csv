@@ -1,0 +1,10 @@
+provider,region,compute_mult,storage_mult,iops_mult
+aws,us-east-1,1.00,1.00,1.00
+aws,ap-south-1,1.10,1.12,1.10
+aws,eu-west-1,1.05,1.05,1.05
+azure,eastus,1.00,1.00,1.00
+azure,centralindia,1.10,1.12,1.10
+azure,westeurope,1.05,1.05,1.05
+gcp,us-central1,1.00,1.00,1.00
+gcp,asia-south1,1.10,1.12,1.10
+gcp,europe-west1,1.05,1.05,1.05

@@ -10,8 +10,13 @@ reports/
 models/
 *.png
 
-# Data generated locally (optional, you can remove this if you want to keep data/)
-data/*.csv
+# Keep metrics/dataset out of git, but include pricing/regions
+data/run*_metrics.csv
+data/dataset.csv
+
+# DO include these pricing/lookup files:
+!data/*pricing.csv
+!data/regions.csv
 
 # OS junk
 .DS_Store

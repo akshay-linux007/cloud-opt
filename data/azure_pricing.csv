@@ -1,0 +1,8 @@
+provider,instance_type,vcpus,mem_gb,price_per_hour,storage_type,storage_price_per_gb_month,iops_included,iops_price_per_iops_month
+azure,Standard_D4s_v5,4,16,0.1880,managed-premium-ssd,0.12,0,0.0
+azure,Standard_D8s_v5,8,32,0.3760,managed-premium-ssd,0.12,0,0.0
+azure,Standard_F8s_v2,8,16,0.3440,managed-premium-ssd,0.10,0,0.0
+azure,Standard_E64s_v5,64,512,5.5000,managed-premium-ssd,0.12,0,0.0
+azure,Standard_E96s_v5,96,768,8.2500,managed-premium-ssd,0.12,0,0.0
+azure,Standard_E104i_v5,104,832,7.9000,managed-premium-ssd,0.12,0,0.0
+azure,Standard_M128s,128,2048,12.0000,managed-premium-ssd,0.12,0,0.0

@@ -1,0 +1,8 @@
+provider,instance_type,vcpus,mem_gb,price_per_hour,storage_type,storage_price_per_gb_month,iops_included,iops_price_per_iops_month
+gcp,n2-standard-4,4,16,0.2040,pd-ssd,0.17,0,0.0
+gcp,c2-standard-8,8,32,0.4180,pd-ssd,0.17,0,0.0
+gcp,e2-standard-4,4,16,0.1340,pd-balanced,0.10,0,0.0
+gcp,n2-highmem-64,64,512,4.4280,pd-ssd,0.17,0,0.0
+gcp,n2-highmem-80,80,640,5.5350,pd-ssd,0.17,0,0.0
+gcp,n2-highmem-128,128,864,8.8560,pd-ssd,0.17,0,0.0
+gcp,m2-ultramem-128,128,4096,19.0000,pd-ssd,0.17,0,0.0

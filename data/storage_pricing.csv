@@ -1,0 +1,6 @@
+storage_tier,price_per_gb_month_usd,description
+gp2,0.10,General Purpose SSD (approx $0.10/GB-month)
+gp3,0.08,Next-gen SSD (approx $0.08/GB-month)
+st1,0.045,Throughput optimized HDD (approx $0.045/GB-month)
+sc1,0.025,Cold HDD (approx $0.025/GB-month)
+standard_hdd,0.02,Standard HDD (approx $0.02/GB-month)

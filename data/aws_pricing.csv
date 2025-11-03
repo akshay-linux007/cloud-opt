@@ -1,0 +1,9 @@
+provider,instance_type,vcpus,mem_gb,price_per_hour,storage_type,storage_price_per_gb_month,iops_included,iops_price_per_iops_month
+aws,t3.xlarge,4,16,0.1664,ebs-gp3,0.08,3000,0.005
+aws,c5.2xlarge,8,16,0.3400,ebs-gp3,0.08,3000,0.005
+aws,m5.4xlarge,16,64,0.7680,ebs-gp3,0.08,3000,0.005
+aws,r5.16xlarge,64,512,4.0320,ebs-gp3,0.08,3000,0.005
+aws,r5.24xlarge,96,768,6.0480,ebs-gp3,0.08,3000,0.005
+aws,m6i.32xlarge,128,512,6.1440,ebs-gp3,0.08,3000,0.005
+aws,r6i.32xlarge,128,1024,8.0640,ebs-gp3,0.08,3000,0.005
+aws,m5.8xlarge,32,128,1.5360,ebs-io2,0.125,0,0.065

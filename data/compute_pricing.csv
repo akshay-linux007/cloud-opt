@@ -1,0 +1,17 @@
+provider,region,instance_type,vcpus,mem_gb,price_per_hour
+aws,us-east-1,t3.xlarge,4,16,0.1664
+aws,us-east-1,c5.2xlarge,8,16,0.3400
+aws,us-east-1,m5.4xlarge,16,64,0.7680
+aws,us-east-1,r5.8xlarge,32,256,2.0160
+aws,ap-south-1,m5.4xlarge,16,64,0.8600
+aws,ap-south-1,r5.8xlarge,32,256,2.2500
+azure,eastus,Standard_D4s_v5,4,16,0.1880
+azure,eastus,Standard_D8s_v5,8,32,0.3840
+azure,eastus,Standard_D32s_v5,32,128,1.5040
+azure,centralindia,Standard_D8s_v5,8,32,0.4400
+azure,centralindia,Standard_D64s_v5,64,256,3.2000
+gcp,us-central1,e2-standard-4,4,16,0.1340
+gcp,us-central1,c2-standard-8,8,32,0.4180
+gcp,us-central1,n2-standard-64,64,256,1.6320
+gcp,asia-south1,c2-standard-8,8,32,0.4600
+gcp,asia-south1,n2-standard-64,64,256,1.8500

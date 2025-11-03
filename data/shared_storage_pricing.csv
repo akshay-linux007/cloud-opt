@@ -1,0 +1,7 @@
+provider,region,service,tier,price_per_gb_month,throughput_price_per_mb_s_hour,request_price_per_million,base_tier_price_per_hour
+aws,us-east-1,efs,standard,0.30,0.00,0.00,0.00
+aws,ap-south-1,efs,standard,0.36,0.00,0.00,0.00
+azure,eastus,azure-files,premium,0.16,0.00,0.00,0.00
+azure,centralindia,azure-files,premium,0.20,0.00,0.00,0.00
+gcp,us-central1,filestore,basic,0.16,0.00,0.00,0.00
+gcp,asia-south1,filestore,basic,0.20,0.00,0.00,0.00
