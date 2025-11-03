@@ -1,0 +1,4 @@
+  293  cd ~/Desktop/cloud-opt\n
+  295  history | grep cloud-opt
+  296  history | grep python
+  297  history | grep src

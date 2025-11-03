@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# Local artifacts
+reports/
+models/
+*.png
+
+# Data generated locally (optional, you can remove this if you want to keep data/)
+data/*.csv
+
+# OS junk
+.DS_Store
