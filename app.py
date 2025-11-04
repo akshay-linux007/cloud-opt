@@ -1,9 +1,9 @@
-# app.py — Cloud Cost Calculator (Auto storage selection + Object storage + Scope aware)
+# app.py — Cloud Cost Calculator (macro regions + auto storage + clean export)
 import math
 import pandas as pd
 import streamlit as st
 
-from src.pricing import load_pricing  # pricing.py loads compute/block/shared/object CSVs
+from src.pricing import load_pricing  # we use pricing tables directly
 
 # -------- Helpers --------
 def parse_size_to_gb(size_str: str) -> float:
@@ -29,10 +29,44 @@ def _normalize_cols(df, cols):
             df[c] = df[c].astype(str).str.lower().str.strip()
     return df
 
+def infer_macro_region(provider: str, region: str) -> str:
+    """Map cloud regions to macro regions: US, Europe, India (others ignored)."""
+    p = (provider or "").lower()
+    r = (region or "").lower()
+
+    # AWS
+    if p == "aws":
+        if r.startswith("us-"):
+            return "US"
+        if r.startswith("eu-"):
+            return "Europe"
+        if r == "ap-south-1":  # Mumbai
+            return "India"
+
+    # Azure
+    if p == "azure":
+        if r in {"eastus", "westus", "westus2", "centralus", "southcentralus", "northcentralus"}:
+            return "US"
+        if r in {"westeurope", "northeurope"}:
+            return "Europe"
+        if r in {"centralindia", "southindia", "westindia"}:
+            return "India"
+
+    # GCP
+    if p == "gcp":
+        if r.startswith("us-"):
+            return "US"
+        if r.startswith("europe-"):
+            return "Europe"
+        if r in {"asia-south1", "asia-south2"}:  # Mumbai, Delhi
+            return "India"
+
+    return ""  # anything else not in requested macro-regions
+
 # -------- Page setup --------
 st.set_page_config(page_title="Cloud Cost Calculator", layout="wide")
 st.title("Cloud Cost & Performance Optimizer — Regional Estimator")
-st.caption("Estimates single-run costs across AWS / Azure / GCP using regional CSV pricing. Supports Block, Shared (NFS/SMB), and Object storage with Auto selection.")
+st.caption("Estimates run cost across AWS / Azure / GCP with regional CSV pricing. Auto-picks the cheapest storage (block/shared/object) when selected.")
 
 # -------- Load pricing --------
 try:
@@ -50,6 +84,18 @@ for df in (compute_df, block_df, shared_df, object_df):
     if not df.empty:
         _normalize_cols(df, ["provider","region","instance_type","storage_type","service","tier"])
 
+# -------- Build option lists --------
+region_options = sorted(compute_df["region"].dropna().unique()) if "region" in compute_df else []
+
+storage_class_set = set()
+if "storage_type" in block_df:
+    storage_class_set.update(block_df["storage_type"].dropna().unique())
+if "service" in shared_df:
+    storage_class_set.update(shared_df["service"].dropna().unique())
+if "storage_type" in object_df:
+    storage_class_set.update(object_df["storage_type"].dropna().unique())
+storage_dropdown = ["any"] + sorted(storage_class_set)
+
 # -------- Sidebar inputs --------
 st.sidebar.header("Inputs")
 
@@ -61,19 +107,6 @@ hours   = st.sidebar.number_input("Hours",   min_value=0, value=0, step=1)
 minutes = st.sidebar.number_input("Minutes", min_value=0, value=0, step=5)
 run_hours = (days*86400 + hours*3600 + minutes*60) / 3600.0
 
-# Region options (scoped to provider selection so the list is relevant)
-region_source = compute_df.copy()
-if scope != "all" and "provider" in region_source.columns:
-    region_source = region_source[region_source["provider"] == scope]
-region_options = sorted(region_source["region"].dropna().unique()) if "region" in region_source else []
-
-st.sidebar.subheader("Regions")
-chosen_regions = st.sidebar.multiselect(
-    "Select regions (leave empty = all)",
-    region_options, default=[]
-) if region_options else []
-
-# Compute sizing
 st.sidebar.subheader("Compute sizing")
 cpu_mode = st.sidebar.selectbox("CPU sizing mode", ["vcpu", "percent"], index=0)
 if cpu_mode == "vcpu":
@@ -90,7 +123,6 @@ else:
 
 mem_gb_needed = parse_size_to_gb(mem_str)
 
-# Storage selectors
 st.sidebar.subheader("Storage")
 storage_mode = st.sidebar.selectbox(
     "Storage mode",
@@ -99,21 +131,6 @@ storage_mode = st.sidebar.selectbox(
 )
 storage_size = st.sidebar.text_input("Data size (GB or TB) — for block/shared/object", "100 GB")
 storage_gb = parse_size_to_gb(storage_size)
-
-# Build storage class/tier list from all sources (block/shared/object; both service and storage_type)
-storage_class_set = set()
-if not block_df.empty and "storage_type" in block_df:
-    storage_class_set.update(block_df["storage_type"].dropna().unique())
-if not shared_df.empty and "service" in shared_df:
-    storage_class_set.update(shared_df["service"].dropna().unique())
-if not shared_df.empty and "tier" in shared_df:
-    storage_class_set.update(shared_df["tier"].dropna().unique())
-if not object_df.empty and "service" in object_df:
-    storage_class_set.update(object_df["service"].dropna().unique())
-if not object_df.empty and "storage_type" in object_df:
-    storage_class_set.update(object_df["storage_type"].dropna().unique())
-
-storage_dropdown = ["any"] + sorted({str(x).lower().strip() for x in storage_class_set})
 
 storage_class = st.sidebar.selectbox(
     "Storage class / tier (optional filter)",
@@ -124,7 +141,6 @@ storage_class = st.sidebar.selectbox(
 
 iops_needed = st.sidebar.number_input("Required storage IOPS (if block)", min_value=0, value=0, step=500)
 
-# Currency & tax
 st.sidebar.subheader("Currency / Tax")
 apply_tax = st.sidebar.toggle("Apply 18% tax", value=False)
 convert_inr = st.sidebar.toggle("Convert USD → INR (x83)", value=False)
@@ -135,7 +151,6 @@ go = st.sidebar.button("Calculate")
 with st.expander("Input summary", expanded=True):
     st.write({
         "scope": scope,
-        "selected_regions": chosen_regions or "ALL",
         "cpu_mode": cpu_mode,
         "vcpus_needed": int(vcpus_needed),
         "mem_gb_needed": float(mem_gb_needed),
@@ -159,20 +174,15 @@ if compute_df.empty:
 
 base = compute_df.copy()
 
-# Provider scope (this drives the recommendation to be AWS-only / Azure-only / GCP-only when chosen)
+# Provider scope
 if scope != "all" and "provider" in base.columns:
     base = base[base["provider"] == scope]
-
-# Region filter
-if chosen_regions and "region" in base.columns:
-    base = base[base["region"].isin(chosen_regions)]
 
 # Size filter
 if not {"vcpus","mem_gb"}.issubset(base.columns):
     st.error("compute_pricing_regional.csv must have columns: vcpus, mem_gb")
     st.stop()
 base = base[(base["vcpus"] >= int(vcpus_needed)) & (base["mem_gb"] >= float(mem_gb_needed))]
-
 if base.empty:
     st.warning("No matching compute instance for requested size. Add rows to CSVs or relax sizing.")
     st.stop()
@@ -184,10 +194,7 @@ def build_block_table(base_df: pd.DataFrame) -> pd.DataFrame:
     df = base_df.merge(block_df, on=["provider","region"], how="left", suffixes=("","_blk"))
     if storage_class != "any" and "storage_type" in df.columns:
         df = df[df["storage_type"] == storage_class]
-    df["price_per_gb_month"] = pd.to_numeric(df.get("price_per_gb_month", 0.0), errors="coerce").fillna(0.0)
-    df["iops_included"] = pd.to_numeric(df.get("iops_included", 0.0), errors="coerce").fillna(0.0)
-    df["iops_price_per_iops_month"] = pd.to_numeric(df.get("iops_price_per_iops_month", 0.0), errors="coerce").fillna(0.0)
-    df["storage_hourly"] = df["price_per_gb_month"].apply(lambda p: storage_hourly_cost(storage_gb, p))
+    df["storage_hourly"] = df["price_per_gb_month"].fillna(0.0).apply(lambda p: storage_hourly_cost(storage_gb, p))
     df["iops_hourly"] = df.apply(
         lambda r: iops_hourly_cost(iops_needed, r.get("iops_included",0.0), r.get("iops_price_per_iops_month",0.0)),
         axis=1
@@ -199,10 +206,9 @@ def build_shared_table(base_df: pd.DataFrame) -> pd.DataFrame:
     if shared_df.empty:
         return pd.DataFrame()
     df = base_df.merge(shared_df, on=["provider","region"], how="left", suffixes=("","_sh"))
-    # allow filter by either service or tier name
-    if storage_class != "any" and ("service" in df.columns or "tier" in df.columns):
-        df = df[(df.get("service","") == storage_class) | (df.get("tier","") == storage_class)]
-    df["price_per_gb_month"] = pd.to_numeric(df.get("price_per_gb_month", 0.0), errors="coerce").fillna(0.0)
+    if storage_class != "any" and "service" in df.columns:
+        df = df[df["service"] == storage_class]
+    df["price_per_gb_month"] = df["price_per_gb_month"].fillna(0.0)
     df["storage_hourly"] = df["price_per_gb_month"].apply(lambda p: storage_hourly_cost(storage_gb, p))
     df["iops_hourly"] = 0.0
     df["storage_choice"] = df.get("service", "shared").fillna("shared")
@@ -212,17 +218,16 @@ def build_object_table(base_df: pd.DataFrame) -> pd.DataFrame:
     if object_df.empty:
         return pd.DataFrame()
     df = base_df.merge(object_df, on=["provider","region"], how="left", suffixes=("","_obj"))
-    # allow filter by service or storage_type for object
-    if storage_class != "any" and ("service" in df.columns or "storage_type" in df.columns):
-        df = df[(df.get("service","") == storage_class) | (df.get("storage_type","") == storage_class)]
-    df["price_per_gb_month"] = pd.to_numeric(df.get("price_per_gb_month", 0.0), errors="coerce").fillna(0.0)
+    if storage_class != "any" and "storage_type" in df.columns:
+        df = df[df["storage_type"] == storage_class]
+    df["price_per_gb_month"] = df["price_per_gb_month"].fillna(0.0)
     df["storage_hourly"] = df["price_per_gb_month"].apply(lambda p: storage_hourly_cost(storage_gb, p))
     df["iops_hourly"] = 0.0
-    df["storage_choice"] = df.get("service", df.get("storage_type", "object")).fillna("object")
+    df["storage_choice"] = df.get("storage_type", "object").fillna("object")
     return df
 
-# Choose mode
-mode_key = storage_mode.split()[0].lower()  # "auto", "replicated", "shared", "object"
+# Build per selected mode
+mode_key = storage_mode.split()[0]  # "auto", "replicated", "shared", "object"
 
 tables = []
 if mode_key == "auto":
@@ -234,55 +239,81 @@ if mode_key == "auto":
         st.error("No storage pricing available (block/shared/object CSVs empty).")
         st.stop()
     all_modes = pd.concat(tables, ignore_index=True)
-    for col in ("price_per_hour", "storage_hourly", "iops_hourly"):
-        all_modes[col] = pd.to_numeric(all_modes.get(col, 0.0), errors="coerce").fillna(0.0)
+    all_modes["storage_hourly"] = all_modes["storage_hourly"].fillna(0.0)
+    all_modes["iops_hourly"]    = all_modes["iops_hourly"].fillna(0.0)
     all_modes["total_hourly_usd"] = (
-        all_modes["price_per_hour"] + all_modes["storage_hourly"] + all_modes["iops_hourly"]
+        all_modes["price_per_hour"].astype(float)
+        + all_modes["storage_hourly"].astype(float)
+        + all_modes["iops_hourly"].astype(float)
     )
-    # pick cheapest storage per (provider, region, instance_type)
-    all_modes["row_rank"] = (
+    # First: pick CHEAPEST *per provider+region+instance* (dedupe)
+    all_modes["row_rank_inner"] = (
         all_modes.groupby(["provider","region","instance_type"])["total_hourly_usd"]
         .rank(method="first")
     )
-    candidates = all_modes[all_modes["row_rank"] == 1.0].drop(columns=["row_rank"])
+    all_modes = all_modes[all_modes["row_rank_inner"] == 1.0].drop(columns=["row_rank_inner"])
+    candidates = all_modes
 else:
     if mode_key.startswith("replicated"):
         candidates = build_block_table(base)
     elif mode_key.startswith("shared"):
         candidates = build_shared_table(base)
-    else:  # object
+    else:
         candidates = build_object_table(base)
 
 if candidates is None or candidates.empty:
     st.warning("No candidates after applying storage filters/tiers.")
     st.stop()
 
-# -------- currency/tax & totals --------
-candidates = candidates.copy()
+# -------- Currency/tax & totals --------
 USD_TO_INR = 83.0
 tax_mult   = 1.18 if apply_tax else 1.0
 curr_mult  = USD_TO_INR if convert_inr else 1.0
 curr_label = "INR" if convert_inr else "USD"
 
-for col in ("price_per_hour","storage_hourly","iops_hourly"):
-    candidates[col] = pd.to_numeric(candidates.get(col, 0.0), errors="coerce").fillna(0.0)
-
-candidates["est_cost_run_usd"]  = (
-    candidates["price_per_hour"] + candidates["storage_hourly"] + candidates["iops_hourly"]
-) * float(run_hours)
-
-candidates["total_hourly_disp"] = (
-    candidates["price_per_hour"] + candidates["storage_hourly"] + candidates["iops_hourly"]
-) * tax_mult * curr_mult
-
+candidates = candidates.copy()
+candidates["total_hourly_usd"] = (
+    candidates["price_per_hour"].astype(float)
+    + candidates["storage_hourly"].astype(float)
+    + candidates["iops_hourly"].astype(float)
+)
+candidates["est_cost_run_usd"]  = candidates["total_hourly_usd"] * float(run_hours)
+candidates["total_hourly_disp"] = candidates["total_hourly_usd"] * tax_mult * curr_mult
 candidates["est_cost_run_disp"] = candidates["est_cost_run_usd"] * tax_mult * curr_mult
 
-# -------- Recommendation (respects provider scope) --------
+# -------- Macro-region folding: US / Europe / India --------
+candidates["macro_region"] = candidates.apply(
+    lambda r: infer_macro_region(r.get("provider",""), r.get("region","")),
+    axis=1
+)
+# keep only the requested macro regions
+candidates = candidates[candidates["macro_region"].isin(["US","Europe","India"])]
+
+if candidates.empty:
+    st.warning("No candidates in macro regions US/Europe/India for the requested size.")
+    st.stop()
+
+# Pick ONE cheapest row per (provider, macro_region)
+candidates = (
+    candidates.sort_values("total_hourly_disp")
+    .groupby(["provider","macro_region"], as_index=False)
+    .first()
+)
+
+# If single-cloud scope, keep only that provider
+if scope in ("aws","azure","gcp"):
+    candidates = candidates[candidates["provider"] == scope]
+
+if candidates.empty:
+    st.warning("No rows after applying cloud scope.")
+    st.stop()
+
+# -------- Recommendation (cheapest among displayed rows) --------
 best = candidates.nsmallest(1, "total_hourly_disp").iloc[0]
 
 st.subheader("Recommendation")
 st.write(
-    f"**{best['provider'].upper()} | {best['instance_type']} | {best['region']}**  \n"
+    f"**{best['provider'].upper()} | {best['instance_type']} | {best['macro_region']} ({best['region']})**  \n"
     f"vCPU={int(best['vcpus'])}, RAM={best['mem_gb']:.0f} GB"
 )
 st.write(
@@ -296,33 +327,36 @@ st.write(
 )
 st.caption(f"Chosen storage: **{best.get('storage_choice','n/a')}**")
 
-# -------- Per-region costs (all matching providers/regions) --------
+# -------- Per-cloud × macro-region table (clean & short) --------
 st.markdown("---")
-st.subheader("Per-region costs")
+st.subheader("Per-cloud cost across US / Europe / India (best region picked per macro-zone)")
 
-show = candidates.copy()
-show["total_hr_disp"] = show["total_hourly_disp"]
-show["run_cost_disp"] = show["est_cost_run_disp"]
-
-columns = [
-    "provider","region","instance_type","vcpus","mem_gb",
-    "price_per_hour","storage_hourly","iops_hourly",
-    "storage_choice","total_hr_disp","run_cost_disp"
+show_cols = [
+    "provider","macro_region","region","instance_type","vcpus","mem_gb",
+    "price_per_hour","storage_hourly","iops_hourly","storage_choice",
+    "total_hourly_disp","est_cost_run_disp"
 ]
-columns = [c for c in columns if c in show.columns]
+show_cols = [c for c in show_cols if c in candidates.columns]
 
 pretty = (
-    show[columns]
+    candidates[show_cols]
     .rename(columns={
         "price_per_hour": "compute_hr_usd",
         "storage_hourly": "storage_hr_usd",
         "iops_hourly": "iops_hr_usd",
-        "total_hr_disp": f"total_hr_{curr_label.lower()}",
-        "run_cost_disp": f"run_cost_{curr_label.lower()}",
+        "total_hourly_disp": f"total_hr_{curr_label.lower()}",
+        "est_cost_run_disp": f"run_cost_{curr_label.lower()}",
     })
-    .sort_values(by=f"run_cost_{curr_label.lower()}")
+    .sort_values(by=[ "provider", "macro_region" ])
 )
 
 st.dataframe(pretty, use_container_width=True, hide_index=True)
 
-st.caption("If prices look identical, confirm your *_regional.csv files have region-specific numbers and the provider scope/regions match your selections.")
+# -------- CSV Export (only displayed rows) --------
+csv_bytes = pretty.to_csv(index=False).encode("utf-8")
+st.download_button(
+    label="Download results (CSV)",
+    data=csv_bytes,
+    file_name="cloud-opt_results.csv",
+    mime="text/csv",
+)
