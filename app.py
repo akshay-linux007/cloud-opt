@@ -87,16 +87,32 @@ else:
     chosen_regions = []
     st.sidebar.info("No regions found in compute CSVs for the current scope.")
 
-# Compute sizing
+# ---- Compute sizing (real percent mode) ----
 st.sidebar.subheader("Compute sizing")
 cpu_mode = st.sidebar.selectbox("CPU sizing mode", ["vcpu", "percent"], index=0)
+
 if cpu_mode == "vcpu":
-    vcpus_needed = st.sidebar.number_input("vCPUs", min_value=1, value=8, step=1)
-    mem_str = st.sidebar.text_input("RAM needed (e.g., 32 GB / 0.5 TB)", "32 GB")
+    # direct entry
+    vcpus_needed = st.sidebar.number_input("vCPUs needed", min_value=1, value=8, step=1)
+    mem_str = st.sidebar.text_input("RAM needed (e.g., 16 GB / 32 GB / 0.5 TB)", "32 GB")
+
 else:
-    st.sidebar.info("Percent mode placeholder — using fallback numeric vCPU.")
-    vcpus_needed = st.sidebar.number_input("Estimated vCPUs (fallback)", min_value=1, value=8, step=1)
-    mem_str = st.sidebar.text_input("RAM needed (e.g., 32 GB / 0.5 TB)", "32 GB")
+    # Percent-driven right-sizing
+    st.sidebar.info("Enter your current usage and we’ll right-size vCPUs automatically.")
+
+    current_vcpus = st.sidebar.number_input("Current On-Prem vCPUs", min_value=1, value=32)
+    avg_cpu_percent = st.sidebar.slider("Avg CPU Utilization (%)", 1, 100, 40)
+    target_util_percent = st.sidebar.slider("Target Cloud Utilization (%)", 10, 100, 70,
+                                            help="We’ll size so the cloud instance runs near this utilization.")
+
+    vcpus_needed = max(
+        1,
+        math.ceil((current_vcpus * (avg_cpu_percent / 100.0)) / (target_util_percent / 100.0))
+    )
+
+    st.sidebar.success(f"Estimated vCPUs needed: {vcpus_needed}")
+
+    mem_str = st.sidebar.text_input("RAM needed (e.g., 16 GB / 32 GB / 64 GB / 128 GB)", "32 GB")
 
 mem_gb_needed = parse_size_to_gb(mem_str)
 
