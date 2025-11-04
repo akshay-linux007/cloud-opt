@@ -1,0 +1,25 @@
+provider,region,storage_type,price_per_gb_month
+# --- AWS S3 (sample tiers) ---
+aws,us-east-1,s3-standard,0.023
+aws,us-east-1,s3-infrequent-access,0.0125
+aws,eu-west-1,s3-standard,0.0245
+aws,eu-west-1,s3-infrequent-access,0.0137
+aws,ap-south-1,s3-standard,0.025
+aws,ap-south-1,s3-infrequent-access,0.0138
+
+# --- Azure Blob (sample tiers) ---
+azure,eastus,azure-blob-hot,0.0184
+azure,eastus,azure-blob-cool,0.01
+azure,westeurope,azure-blob-hot,0.0208
+azure,westeurope,azure-blob-cool,0.0125
+azure,centralindia,azure-blob-hot,0.019
+azure,centralindia,azure-blob-cool,0.011
+
+# --- GCP Cloud Storage (sample tiers) ---
+gcp,us-central1,gcs-standard,0.020
+gcp,us-central1,gcs-nearline,0.010
+gcp,europe-west1,gcs-standard,0.023
+gcp,europe-west1,gcs-nearline,0.012
+gcp,asia-south1,gcs-standard,0.023
+gcp,asia-south1,gcs-nearline,0.012
+
