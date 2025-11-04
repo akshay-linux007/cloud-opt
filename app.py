@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-# Your pricing engine (now wrapped for back-compat)
+# Your pricing engine (back-compat wrapper names)
 from src.pricing import load_pricing, pick_candidates
 
 # ---------------- Helpers ----------------
@@ -13,9 +13,9 @@ def parse_size_to_gb(size_str: str) -> float:
     if not s:
         return 0.0
     if "tb" in s:
-        return float(s.replace("tb","").strip()) * 1024.0
+        return float(s.replace("tb", "").strip()) * 1024.0
     if "gb" in s:
-        return float(s.replace("gb","").strip())
+        return float(s.replace("gb", "").strip())
     # assume a plain number means GB
     return float(s)
 
@@ -32,20 +32,18 @@ st.title("Cloud Cost & Performance Optimizer — Regional Estimator")
 st.caption("Estimates single-run costs across AWS / Azure / GCP using regional CSV pricing.")
 
 # ---------------- Load pricing once ----------------
-# We load first so we can *derive* dropdown options (regions, storage classes)
 try:
-    pricing = load_pricing()  # wrapper returns regional dict in your updated pricing.py
+    # Updated pricing.py returns a dict with compute, block, (optional) shared
+    pricing = load_pricing()
 except Exception as e:
     st.error(f"Failed to load pricing: {e}")
     st.stop()
 
-# Expecting dict-like with at least compute and block frames inside
-# Normalize missing tables safely
 compute_df = pricing.get("compute", pd.DataFrame()).copy()
 block_df   = pricing.get("block",   pd.DataFrame()).copy()
 shared_df  = pricing.get("shared",  pd.DataFrame()).copy()
 
-# Build option lists
+# Build option lists from loaded CSVs
 region_options = []
 if not compute_df.empty and "region" in compute_df.columns:
     region_options = sorted(compute_df["region"].dropna().astype(str).unique())
@@ -55,7 +53,6 @@ if not block_df.empty and "storage_type" in block_df.columns:
     storage_class_options.update(block_df["storage_type"].dropna().astype(str).unique())
 if not shared_df.empty and "service" in shared_df.columns:
     storage_class_options.update(shared_df["service"].dropna().astype(str).unique())
-# Canonicalize and show as dropdown
 storage_class_options = sorted(sc.lower().strip() for sc in storage_class_options)
 storage_dropdown = ["any"] + storage_class_options
 
@@ -65,14 +62,14 @@ st.sidebar.header("Inputs")
 # Scope selection (kept for future provider filtering if needed)
 scope = st.sidebar.selectbox("Cloud scope", ["all", "aws", "azure", "gcp"], index=0)
 
-# Duration section
+# Runtime
 st.sidebar.subheader("Runtime")
-days   = st.sidebar.number_input("Days",   min_value=0, value=1, step=1)
-hours  = st.sidebar.number_input("Hours",  min_value=0, value=0, step=1)
-minutes= st.sidebar.number_input("Minutes",min_value=0, value=0, step=5)
+days    = st.sidebar.number_input("Days",    min_value=0, value=1, step=1)
+hours   = st.sidebar.number_input("Hours",   min_value=0, value=0, step=1)
+minutes = st.sidebar.number_input("Minutes", min_value=0, value=0, step=5)
 run_hours = (days*86400 + hours*3600 + minutes*60) / 3600.0
 
-# Region chooser — moved just after duration (your request)
+# Regions (moved just after runtime)
 st.sidebar.subheader("Regions")
 if region_options:
     chosen_regions = st.sidebar.multiselect(
@@ -98,19 +95,19 @@ else:
 
 mem_gb_needed = parse_size_to_gb(mem_str)
 
-# Storage section
+# Storage
 st.sidebar.subheader("Storage")
 storage_mode = st.sidebar.selectbox("Storage mode", ["replicated", "shared"], index=0)
 size_label = "Shared FS size (GB or TB)" if storage_mode == "shared" else "Block storage size (GB or TB)"
 storage_size = st.sidebar.text_input(size_label, "100 GB")
 storage_gb = parse_size_to_gb(storage_size)
 
-# Storage *class* now a dropdown (not free text)
+# Storage class dropdown
 storage_class = st.sidebar.selectbox(
     "Storage class / service",
     storage_dropdown,
     index=0,
-    help="Choose a specific class/service to filter (e.g., ebs-gp3, managed-premium-ssd, pd-ssd, filestore, efs)."
+    help="Choose a specific class/service to filter (e.g., ebs-gp3, managed-premium-ssd, pd-ssd, efs, filestore)."
 )
 
 iops_needed = st.sidebar.number_input("Required storage IOPS (provisioned)", min_value=0, value=0, step=500)
@@ -144,7 +141,6 @@ if not go:
     st.stop()
 
 # ---------------- Compute candidates ----------------
-# Get candidates (this uses your regional-aware pricing under the hood)
 candidates = pick_candidates(
     pricing=pricing,
     vcpus_needed=int(vcpus_needed),
@@ -164,119 +160,86 @@ if chosen_regions:
         st.warning("No candidates in the selected region(s). Try selecting more regions.")
         st.stop()
 
-# Compute hourly and total costs
-if "storage_price_per_gb_month" not in candidates.columns:
-    candidates["storage_price_per_gb_month"] = 0.0
-if "iops_included" not in candidates.columns:
-    candidates["iops_included"] = 0.0
-if "iops_price_per_iops_month" not in candidates.columns:
-    candidates["iops_price_per_iops_month"] = 0.0
+# Ensure required columns exist
+for col in ("storage_price_per_gb_month", "iops_included", "iops_price_per_iops_month"):
+    if col not in candidates.columns:
+        candidates[col] = 0.0
 
+# Hourly & run cost (USD base)
 candidates = candidates.copy()
-candidates["storage_hourly"] = candidates["storage_price_per_gb_month"].apply(
+candidates["storage_hourly"]    = candidates["storage_price_per_gb_month"].apply(
     lambda p: storage_hourly_cost(storage_gb, p)
 )
-candidates["iops_hourly"] = candidates.apply(
+candidates["iops_hourly"]       = candidates.apply(
     lambda r: iops_hourly_cost(iops_needed, r.get("iops_included", 0.0), r.get("iops_price_per_iops_month", 0.0)),
     axis=1
 )
-candidates["total_hourly_usd"] = candidates["price_per_hour"] + candidates["storage_hourly"] + candidates["iops_hourly"]
-candidates["est_cost_run_usd"] = candidates["total_hourly_usd"] * run_hours
+candidates["total_hourly_usd"]  = candidates["price_per_hour"] + candidates["storage_hourly"] + candidates["iops_hourly"]
+candidates["est_cost_run_usd"]  = candidates["total_hourly_usd"] * run_hours
 
 # Currency / tax
 USD_TO_INR = 83.0
-tax_mult = 1.18 if apply_tax else 1.0
-curr_mult = USD_TO_INR if convert_inr else 1.0
+tax_mult   = 1.18 if apply_tax else 1.0
+curr_mult  = USD_TO_INR if convert_inr else 1.0
 curr_label = "INR" if convert_inr else "USD"
 
 candidates["total_hourly_disp"] = candidates["total_hourly_usd"] * tax_mult * curr_mult
 candidates["est_cost_run_disp"] = candidates["est_cost_run_usd"] * tax_mult * curr_mult
 
-# Best pick
+# Best pick across all providers/regions
 best = candidates.nsmallest(1, "total_hourly_usd").iloc[0]
 
-# ---------------- Output Layout ----------------
-left, right = st.columns([0.55, 0.45])
+# ---------------- Output ----------------
+st.subheader("Recommendation")
+st.write(
+    f"**{best['provider'].upper()} | {best['instance_type']} | {best['region']}**  \n"
+    f"vCPU={int(best['vcpus'])}, RAM={best['mem_gb']:.0f} GB"
+)
+st.write(
+    f"Compute/hr: **${best['price_per_hour']:.4f}**  •  "
+    f"Storage/hr: **${best['storage_hourly']:.4f}**  •  "
+    f"IOPS/hr: **${best['iops_hourly']:.4f}**"
+)
+st.write(
+    f"**Total/hr: {best['total_hourly_disp']:.4f} {curr_label}**  •  "
+    f"**Run: {best['est_cost_run_disp']:,.2f} {curr_label}**"
+)
+st.caption("Computed from regional CSVs in `/data`, using your `src/pricing.py` selection rules.")
 
-with left:
-    st.subheader("Recommendation")
-    st.write(
-        f"**{best['provider'].upper()} | {best['instance_type']} | {best['region']}**  \n"
-        f"vCPU={int(best['vcpus'])}, RAM={best['mem_gb']:.0f} GB"
-    )
-    st.write(
-        f"Compute/hr: **${best['price_per_hour']:.4f}**  •  "
-        f"Storage/hr: **${best['storage_hourly']:.4f}**  •  "
-        f"IOPS/hr: **${best['iops_hourly']:.4f}**"
-    )
-    st.write(
-        f"**Total/hr: {best['total_hourly_disp']:.4f} {curr_label}**  •  "
-        f"**Run: {best['est_cost_run_disp']:,.2f} {curr_label}**"
-    )
+# -------- Per-region costs (ALL clouds) --------
+st.markdown("---")
+st.subheader("Per-region costs")
 
-    st.caption("Computed from regional CSVs in `/data`, using your `src/pricing.py` selection rules.")
+region_table = candidates.copy()
 
-with right:
-    st.subheader("Per-region costs")
+# Final display columns in chosen currency
+region_table["total_hr_disp"] = region_table["total_hourly_usd"] * tax_mult * curr_mult
+region_table["run_cost_disp"] = region_table["est_cost_run_usd"] * tax_mult * curr_mult
 
-    region_table = candidates.copy()
+show_cols = [
+    "provider", "region", "instance_type", "vcpus", "mem_gb",
+    "price_per_hour",      # compute/hr (USD)
+    "storage_hourly",      # storage/hr (USD)
+    "iops_hourly",         # iops/hr (USD)
+    "total_hr_disp",       # currency/tax-adjusted
+    "run_cost_disp"        # currency/tax-adjusted
+]
+show_cols = [c for c in show_cols if c in region_table.columns]
 
-    # ---- Ensure required cols exist ----
-    for col in ("storage_hourly", "iops_hourly"):
-        if col not in region_table.columns:
-            region_table[col] = 0.0
+pretty = (
+    region_table[show_cols]
+    .rename(columns={
+        "price_per_hour": "compute_hr_usd",
+        "storage_hourly": "storage_hr_usd",
+        "iops_hourly": "iops_hr_usd",
+        "total_hr_disp": f"total_hr_{curr_label.lower()}",
+        "run_cost_disp": f"run_cost_{curr_label.lower()}",
+        "mem_gb": "mem_gb"
+    })
+    .sort_values(by=f"run_cost_{curr_label.lower()}")
+)
 
-    if "total_hourly" not in region_table.columns:
-        region_table["total_hourly"] = (
-            region_table.get("price_per_hour", 0.0)
-            + region_table["storage_hourly"]
-            + region_table["iops_hourly"]
-        )
+st.dataframe(pretty, use_container_width=True, hide_index=True)
 
-    # ---- Currency/tax conversions ----
-    region_table["total_hr_disp"] = region_table["total_hourly"] * tax_mult * curr_mult
-    region_table["run_cost_disp"] = region_table["total_hr_disp"] * run_hours
-
-    # ---- Display columns ----
-    show_cols = [
-        "provider", "region", "instance_type", "vcpus", "mem_gb",
-        "price_per_hour", "storage_hourly", "iops_hourly",
-        "total_hr_disp", "run_cost_disp"
-    ]
-
-    show_cols = [c for c in show_cols if c in region_table.columns]
-
-    pretty = (
-        region_table[show_cols]
-        .rename(columns={
-            "price_per_hour": "compute_hr_usd",
-            "storage_hourly": "storage_hr_usd",
-            "iops_hourly": "iops_hr_usd",
-            "total_hr_disp": f"total_hr_{curr_label.lower()}",
-            "run_cost_disp": f"run_cost_{curr_label.lower()}",
-            "mem_gb": "mem_gb"
-        })
-        .sort_values(by=f"run_cost_{curr_label.lower()}")
-    )
-
-    st.dataframe(pretty, use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-    st.subheader("Best by provider (cheapest region per cloud)")
-
-    best_by_provider = (
-        region_table.sort_values("run_cost_disp")
-        .groupby("provider", as_index=False)
-        .first()[[
-            "provider", "region", "instance_type", "vcpus", "mem_gb",
-            "total_hr_disp", "run_cost_disp"
-        ]]
-        .rename(columns={
-            "total_hr_disp": f"total_hr_{curr_label.lower()}",
-            "run_cost_disp": f"run_cost_{curr_label.lower()}",
-            "mem_gb": "mem_gb"
-        })
-        .sort_values(by=f"run_cost_{curr_label.lower()}")
-    )
-
-    st.dataframe(best_by_provider, use_container_width=True, hide_index=True)
+# -------- Footer --------
+st.caption("Tip: If per-region prices look identical, verify your *_regional.csv files have different numbers across regions.")
