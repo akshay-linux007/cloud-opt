@@ -217,33 +217,55 @@ with left:
     st.caption("Computed from regional CSVs in `/data`, using your `src/pricing.py` selection rules.")
 
 with right:
-    st.subheader("Region comparison")
+    # ---------- Region & Provider tables (no charts) ----------
+    st.subheader("Per-region costs")
+
+    # Build a clean per-region table in the currently selected currency/tax
+    region_table = candidates.copy()
+
+    # Compute display columns in chosen currency (USD or INR) incl. tax
+    region_table["total_hr_disp"] = region_table["total_hourly"] * tax_mult * curr_mult
+    region_table["run_cost_disp"] = region_table["total_hr_disp"] * run_hours
+
+    # Nice, readable columns
     show_cols = [
-        "provider","region","instance_type","vcpus","mem_gb",
-        "price_per_hour","storage_hourly","iops_hourly",
-        "total_hourly_disp","est_cost_run_disp"
+        "provider", "region", "instance_type", "vcpus", "mem_gb",
+        "price_per_hour", "storage_hourly", "iops_hourly",
+        "total_hr_disp", "run_cost_disp"
     ]
-    present_cols = [c for c in show_cols if c in candidates.columns]
-    table = candidates[present_cols].sort_values("total_hourly_disp", ascending=True)
-    st.dataframe(
-        table.rename(columns={
-            "price_per_hour": "compute/hr (USD)",
-            "storage_hourly": "storage/hr (USD)",
-            "iops_hourly": "iops/hr (USD)",
-            "total_hourly_disp": f"total/hr ({curr_label})",
-            "est_cost_run_disp": f"run ({curr_label})"
-        }),
-        use_container_width=True,
-        hide_index=True
+    show_cols = [c for c in show_cols if c in region_table.columns]
+
+    pretty = (
+        region_table[show_cols]
+        .rename(columns={
+            "price_per_hour": "compute_hr_usd",
+            "storage_hourly": "storage_hr_usd",
+            "iops_hourly": "iops_hr_usd",
+            "total_hr_disp": f"total_hr_{curr_label.lower()}",
+            "run_cost_disp": f"run_cost_{curr_label.lower()}",
+            "mem_gb": "mem_gb"
+        })
+        .sort_values(by=f"run_cost_{curr_label.lower()}")
     )
 
-    # Simple chart: total run cost by region
-    if not table.empty:
-        chart_data = (
-            table.groupby("region", as_index=False)[["est_cost_run_disp"]].min()
-            .sort_values("est_cost_run_disp", ascending=True)
-        )
-        st.bar_chart(chart_data, x="region", y="est_cost_run_disp")
+    st.dataframe(pretty, use_container_width=True, hide_index=True)
 
-st.markdown("---")
-st.caption("Tip: If per-region prices look identical, verify your new *_regional.csv files have different numbers across regions.")
+    st.markdown("---")
+    st.subheader("Best by provider (cheapest region per cloud)")
+
+    best_by_provider = (
+        region_table
+        .sort_values("run_cost_disp")
+        .groupby("provider", as_index=False)
+        .first()[["provider", "region", "instance_type", "vcpus", "mem_gb",
+                  "total_hr_disp", "run_cost_disp"]]
+        .rename(columns={
+            "total_hr_disp": f"total_hr_{curr_label.lower()}",
+            "run_cost_disp": f"run_cost_{curr_label.lower()}",
+            "mem_gb": "mem_gb"
+        })
+        .sort_values(by=f"run_cost_{curr_label.lower()}")
+    )
+
+    st.dataframe(best_by_provider, use_container_width=True, hide_index=True)
+
