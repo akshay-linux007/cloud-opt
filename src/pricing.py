@@ -1,3 +1,20 @@
+
+# --- Back-compat wrappers so older app.py keeps working ---
+def load_pricing(*_args, **_kwargs):
+    """Back-compat: return regional pricing dict just like old loader."""
+    return load_regional_pricing()
+
+def pick_candidates(pricing, vcpus_needed, mem_gb_needed,
+                    storage_mode="replicated", storage_class=None):
+    """Back-compat: delegate to regional candidate builder."""
+    return build_candidates(
+        pricing=pricing,
+        vcpus_needed=vcpus_needed,
+        mem_gb_needed=mem_gb_needed,
+        storage_mode=storage_mode,
+        storage_class=storage_class,
+    )
+
 # src/pricing.py
 from __future__ import annotations
 import os
