@@ -43,11 +43,7 @@ compute_df = pricing.get("compute", pd.DataFrame()).copy()
 block_df   = pricing.get("block",   pd.DataFrame()).copy()
 shared_df  = pricing.get("shared",  pd.DataFrame()).copy()
 
-# Build option lists from loaded CSVs
-region_options = []
-if not compute_df.empty and "region" in compute_df.columns:
-    region_options = sorted(compute_df["region"].dropna().astype(str).unique())
-
+# Build storage class options from loaded CSVs
 storage_class_options = set()
 if not block_df.empty and "storage_type" in block_df.columns:
     storage_class_options.update(block_df["storage_type"].dropna().astype(str).unique())
@@ -59,7 +55,7 @@ storage_dropdown = ["any"] + storage_class_options
 # ---------------- Sidebar inputs ----------------
 st.sidebar.header("Inputs")
 
-# Scope selection (kept for future provider filtering if needed)
+# Cloud scope (used to filter both the Regions list and the candidates)
 scope = st.sidebar.selectbox("Cloud scope", ["all", "aws", "azure", "gcp"], index=0)
 
 # Runtime
@@ -69,8 +65,17 @@ hours   = st.sidebar.number_input("Hours",   min_value=0, value=0, step=1)
 minutes = st.sidebar.number_input("Minutes", min_value=0, value=0, step=5)
 run_hours = (days*86400 + hours*3600 + minutes*60) / 3600.0
 
-# Regions (moved just after runtime)
+# Regions (show only regions for the selected cloud when a single cloud is chosen)
 st.sidebar.subheader("Regions")
+region_options = []
+compute_df_scoped = compute_df.copy()
+if scope in ("aws", "azure", "gcp") and "provider" in compute_df_scoped.columns:
+    compute_df_scoped = compute_df_scoped[
+        compute_df_scoped["provider"].str.lower() == scope
+    ]
+if not compute_df_scoped.empty and "region" in compute_df_scoped.columns:
+    region_options = sorted(compute_df_scoped["region"].dropna().astype(str).unique())
+
 if region_options:
     chosen_regions = st.sidebar.multiselect(
         "Select regions (leave empty = all)",
@@ -80,7 +85,7 @@ if region_options:
     )
 else:
     chosen_regions = []
-    st.sidebar.info("No regions found in compute CSVs. Will evaluate with whatever is available.")
+    st.sidebar.info("No regions found in compute CSVs for the current scope.")
 
 # Compute sizing
 st.sidebar.subheader("Compute sizing")
@@ -153,6 +158,13 @@ if candidates is None or candidates.empty:
     st.warning("No matching instance found. Add larger SKUs to CSVs or relax filters.")
     st.stop()
 
+# Provider filter from UI (apply BEFORE best pick)
+if scope in ("aws", "azure", "gcp"):
+    candidates = candidates[candidates["provider"].str.lower() == scope]
+    if candidates.empty:
+        st.warning(f"No matches for provider '{scope.upper()}' with the current inputs. Try relaxing vCPU/RAM or storage.")
+        st.stop()
+
 # Optional region filter from UI
 if chosen_regions:
     candidates = candidates[candidates["region"].isin(chosen_regions)]
@@ -186,7 +198,7 @@ curr_label = "INR" if convert_inr else "USD"
 candidates["total_hourly_disp"] = candidates["total_hourly_usd"] * tax_mult * curr_mult
 candidates["est_cost_run_disp"] = candidates["est_cost_run_usd"] * tax_mult * curr_mult
 
-# Best pick across all providers/regions
+# Best pick (scoped by provider if selected)
 best = candidates.nsmallest(1, "total_hourly_usd").iloc[0]
 
 # ---------------- Output ----------------
@@ -206,7 +218,7 @@ st.write(
 )
 st.caption("Computed from regional CSVs in `/data`, using your `src/pricing.py` selection rules.")
 
-# -------- Per-region costs (ALL clouds) --------
+# -------- Per-region costs (scoped by provider if chosen; all providers when scope=all) --------
 st.markdown("---")
 st.subheader("Per-region costs")
 
