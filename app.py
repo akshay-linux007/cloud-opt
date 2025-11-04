@@ -221,10 +221,11 @@ with right:
 
     region_table = candidates.copy()
 
-    # ---- Make sure required columns exist ----
+    # ---- Ensure required cols exist ----
     for col in ("storage_hourly", "iops_hourly"):
         if col not in region_table.columns:
             region_table[col] = 0.0
+
     if "total_hourly" not in region_table.columns:
         region_table["total_hourly"] = (
             region_table.get("price_per_hour", 0.0)
@@ -232,15 +233,17 @@ with right:
             + region_table["iops_hourly"]
         )
 
-    # ---- Currency/tax display columns ----
+    # ---- Currency/tax conversions ----
     region_table["total_hr_disp"] = region_table["total_hourly"] * tax_mult * curr_mult
     region_table["run_cost_disp"] = region_table["total_hr_disp"] * run_hours
 
+    # ---- Display columns ----
     show_cols = [
         "provider", "region", "instance_type", "vcpus", "mem_gb",
         "price_per_hour", "storage_hourly", "iops_hourly",
         "total_hr_disp", "run_cost_disp"
     ]
+
     show_cols = [c for c in show_cols if c in region_table.columns]
 
     pretty = (
@@ -251,7 +254,7 @@ with right:
             "iops_hourly": "iops_hr_usd",
             "total_hr_disp": f"total_hr_{curr_label.lower()}",
             "run_cost_disp": f"run_cost_{curr_label.lower()}",
-            "mem_gb": "mem_gb",
+            "mem_gb": "mem_gb"
         })
         .sort_values(by=f"run_cost_{curr_label.lower()}")
     )
@@ -262,22 +265,18 @@ with right:
     st.subheader("Best by provider (cheapest region per cloud)")
 
     best_by_provider = (
-        region_table
-        .sort_values("run_cost_disp")
+        region_table.sort_values("run_cost_disp")
         .groupby("provider", as_index=False)
-        .first()[["provider", "region", "instance_type", "vcpus", "mem_gb",
-                  "total_hr_disp", "run_cost_disp"]]
+        .first()[[
+            "provider", "region", "instance_type", "vcpus", "mem_gb",
+            "total_hr_disp", "run_cost_disp"
+        ]]
         .rename(columns={
             "total_hr_disp": f"total_hr_{curr_label.lower()}",
             "run_cost_disp": f"run_cost_{curr_label.lower()}",
-            "mem_gb": "mem_gb",
+            "mem_gb": "mem_gb"
         })
         .sort_values(by=f"run_cost_{curr_label.lower()}")
     )
 
     st.dataframe(best_by_provider, use_container_width=True, hide_index=True)
-
-    )
-
-    st.dataframe(best_by_provider, use_container_width=True, hide_index=True)
-
