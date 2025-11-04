@@ -1,72 +1,87 @@
 # src/pricing.py — regional pricing engine with stable wrappers
+from __future__ import annotations
 import os
 import pandas as pd
 
-# CSVs (regional)
+# ---------------- CSV paths (regional) ----------------
 COMPUTE_CSV = "data/compute_pricing_regional.csv"
 BLOCK_CSV   = "data/block_storage_pricing_regional.csv"
 SHARED_CSV  = "data/shared_fs_pricing_regional.csv"
+OBJECT_CSV  = "data/object_storage_pricing_regional.csv"  # NEW
 
-def _norm(df: pd.DataFrame, lower_cols=("provider","region","instance_type","storage_type","service","tier")) -> pd.DataFrame:
+# ---------------- Helpers ----------------
+def _norm(
+    df: pd.DataFrame,
+    lower_cols=("provider","region","instance_type","storage_type","service","tier")
+) -> pd.DataFrame:
+    """Lower/strip key string columns for safe joins & filters."""
     df = df.copy()
     for c in lower_cols:
         if c in df.columns:
             df[c] = df[c].astype(str).str.lower().str.strip()
     return df
 
+def _ensure_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    df = df.copy()
+    for c in cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    return df
+
+# ---------------- Public API ----------------
 def load_pricing() -> dict:
     """
-    Wrapper used by app.py.
-    Returns a dict with three dataframes: compute, block, shared.
+    Load all regional pricing tables.
+    Returns a dict of dataframes:
+      {
+        'compute': <df>,
+        'block':   <df>,
+        'shared':  <df or empty>,
+        'object':  <df or empty>
+      }
     """
-    # Strictly require compute + block; shared is optional
-    missing = [p for p in (COMPUTE_CSV, BLOCK_CSV) if not os.path.exists(p)]
+    # Compute & block are required
+    must = [COMPUTE_CSV, BLOCK_CSV]
+    missing = [p for p in must if not os.path.exists(p)]
     if missing:
         raise FileNotFoundError(f"Missing pricing files: {missing}")
 
     compute = _norm(pd.read_csv(COMPUTE_CSV))
     block   = _norm(pd.read_csv(BLOCK_CSV))
-    shared  = pd.DataFrame()
-    if os.path.exists(SHARED_CSV):
-        shared = _norm(pd.read_csv(SHARED_CSV))
+    shared  = _norm(pd.read_csv(SHARED_CSV)) if os.path.exists(SHARED_CSV) else pd.DataFrame()
+    object_ = _norm(pd.read_csv(OBJECT_CSV)) if os.path.exists(OBJECT_CSV) else pd.DataFrame()
 
-    # Minimal schema checks
-    for req, cols in [
-        ("compute", ["provider","region","instance_type","vcpus","mem_gb","price_per_hour"]),
-        ("block",   ["provider","region","storage_type","price_per_gb_month"]),
+    # Minimal schema checks (compute & block)
+    for name, df, req_cols in [
+        ("compute", compute, ["provider","region","instance_type","vcpus","mem_gb","price_per_hour"]),
+        ("block",   block,   ["provider","region","storage_type","price_per_gb_month"]),
     ]:
-        df = {"compute": compute, "block": block}.get(req, None)
-        if df is not None:
-            missing_cols = [c for c in cols if c not in df.columns]
-            if missing_cols:
-                raise ValueError(f"{req} CSV missing columns: {missing_cols}")
+        missing_cols = [c for c in req_cols if c not in df.columns]
+        if missing_cols:
+            raise ValueError(f"{name} CSV missing columns: {missing_cols}")
 
-    # Make sure numeric cols are numeric
-    for df, cols in [
-        (compute, ["vcpus","mem_gb","price_per_hour"]),
-        (block,   ["price_per_gb_month","iops_included","iops_price_per_iops_month"]),
-    ]:
-        for c in cols:
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    # Types
+    compute = _ensure_numeric(compute, ["vcpus","mem_gb","price_per_hour"])
+    block   = _ensure_numeric(block,   ["price_per_gb_month","iops_included","iops_price_per_iops_month"])
 
     if not shared.empty:
-        for c in ["price_per_gb_month","throughput_price_per_mb_s_month"]:
-            if c in shared.columns:
-                shared[c] = pd.to_numeric(shared[c], errors="coerce").fillna(0.0)
+        shared = _ensure_numeric(shared, ["price_per_gb_month","throughput_price_per_mb_s_month"])
+    if not object_.empty:
+        object_ = _ensure_numeric(object_, ["price_per_gb_month"])
 
-    return {"compute": compute, "block": block, "shared": shared}
+    return {"compute": compute, "block": block, "shared": shared, "object": object_}
 
 def _best_compute(compute: pd.DataFrame, vcpus_needed: int, mem_gb_needed: float) -> pd.DataFrame:
     """
-    Keep only SKUs that can satisfy the requested vCPU & RAM, then prefer smallest that fits.
+    Filter to SKUs that satisfy vCPU & RAM, then prefer smallest that fits.
+    Keep one best-fitting row per provider+region.
     """
     df = compute[(compute["vcpus"] >= vcpus_needed) & (compute["mem_gb"] >= mem_gb_needed)].copy()
     if df.empty:
         return df
     # tie-breakers: smaller vcpu, then smaller mem, then cheaper price
     df = df.sort_values(["vcpus","mem_gb","price_per_hour"], ascending=[True, True, True])
-    # keep the 1st per provider+region (best fitting per region)
+    # best per provider+region
     df = df.groupby(["provider","region"], as_index=False).first()
     return df
 
@@ -79,81 +94,36 @@ def pick_candidates(
     scope: str = "all",
 ) -> pd.DataFrame:
     """
-    Wrapper used by app.py.
-    Returns dataframe with columns:
+    Return a compute candidate per provider+region that fits vCPU/RAM.
+    Columns returned (storage* are zero-filled for back-compat; UI computes real storage later):
       provider, region, instance_type, vcpus, mem_gb, price_per_hour,
       storage_price_per_gb_month, iops_included, iops_price_per_iops_month
     """
     compute = pricing.get("compute", pd.DataFrame()).copy()
-    block   = pricing.get("block",   pd.DataFrame()).copy()
-    shared  = pricing.get("shared",  pd.DataFrame()).copy()
+    block   = pricing.get("block",   pd.DataFrame()).copy()   # kept for schema back-compat check
+    # shared/object present in pricing dict but not used here (UI does storage selection)
 
     if compute.empty or block.empty:
         return pd.DataFrame()
 
-    # Optional provider scope
+    # Optional provider scoping
     if scope in ("aws","azure","gcp"):
         compute = compute[compute["provider"] == scope]
-        block   = block[block["provider"]   == scope]
-        if not shared.empty:
-            shared = shared[shared["provider"] == scope]
 
-    # Find best compute candidate per provider+region
     base = _best_compute(compute, vcpus_needed, mem_gb_needed)
     if base.empty:
         return pd.DataFrame()
 
-    # Attach storage pricing depending on storage_mode
+    # Zero-fill storage columns; app.py now picks the best of block/shared/object
     out = base.copy()
+    out["storage_price_per_gb_month"]   = 0.0
+    out["iops_included"]                = 0.0
+    out["iops_price_per_iops_month"]    = 0.0
 
-    if (storage_mode or "").lower() == "shared":
-        # Use shared FS table (service/tier)
-        if shared.empty:
-            # if no shared table, fall back to zero storage cost
-            out["storage_price_per_gb_month"] = 0.0
-            out["iops_included"] = 0.0
-            out["iops_price_per_iops_month"] = 0.0
-        else:
-            s = shared.copy()
-            # Filter by chosen "class" if provided (match against 'service' or 'tier')
-            if storage_class:
-                s = s[(s["service"] == storage_class) | (s.get("tier","") == storage_class)]
-                if s.empty:
-                    return pd.DataFrame()
-            # For shared FS, we map price_per_gb_month from shared CSV
-            s = s.rename(columns={"price_per_gb_month": "storage_price_per_gb_month"})
-            # Join on provider+region; take min price per region/service
-            s = s.groupby(["provider","region"], as_index=False)[["storage_price_per_gb_month"]].min()
-            out = out.merge(s, on=["provider","region"], how="left")
-            out["storage_price_per_gb_month"] = out["storage_price_per_gb_month"].fillna(0.0)
-            out["iops_included"] = 0.0
-            out["iops_price_per_iops_month"] = 0.0
-
-    else:
-        # Replicated/block storage path
-        b = block.copy()
-        if storage_class:
-            b = b[b["storage_type"] == storage_class]
-            if b.empty:
-                return pd.DataFrame()
-        # Aggregate to the cheapest storage type per provider+region
-        agg = b.groupby(["provider","region"], as_index=False).agg({
-            "price_per_gb_month": "min",
-            "iops_included": "max",
-            "iops_price_per_iops_month": "min"
-        })
-        out = out.merge(
-            agg.rename(columns={"price_per_gb_month":"storage_price_per_gb_month"}),
-            on=["provider","region"],
-            how="left"
-        )
-        for c in ["storage_price_per_gb_month","iops_included","iops_price_per_iops_month"]:
-            out[c] = out[c].fillna(0.0)
-
-    # Final ordering / columns
-    ordered_cols = [
+    # Final column ordering
+    ordered = [
         "provider","region","instance_type","vcpus","mem_gb","price_per_hour",
         "storage_price_per_gb_month","iops_included","iops_price_per_iops_month"
     ]
-    out = out[[c for c in ordered_cols if c in out.columns]].copy()
+    out = out[[c for c in ordered if c in out.columns]].copy()
     return out
