@@ -1,0 +1,8 @@
+provider,region,instance_type,vcpus,mem_gb,price_per_hour
+aws,us-east-1,m6i.32xlarge,128,512,6.144
+aws,eu-west-1,m6i.32xlarge,128,512,6.64
+aws,ap-south-1,m6i.32xlarge,128,512,6.88
+azure,eastus,Standard_D64s_v5,64,256,3.95
+azure,westeurope,Standard_D64s_v5,64,256,4.25
+gcp,us-central1,n2-standard-64,64,256,3.81
+gcp,asia-south1,n2-standard-64,64,256,4.25

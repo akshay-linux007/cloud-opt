@@ -10,12 +10,12 @@ reports/
 models/
 *.png
 
-# Keep metrics/dataset out of git, but include pricing/regions
+# Ignore generated metrics/datasets, but keep pricing & lookup CSVs
 data/run*_metrics.csv
 data/dataset.csv
 
-# DO include these pricing/lookup files:
-!data/*pricing.csv
+# DO include ALL pricing & lookup CSVs (regional too)
+!data/*pricing*.csv
 !data/regions.csv
 
 # OS junk

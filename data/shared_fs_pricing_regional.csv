@@ -1,0 +1,4 @@
+provider,region,service,tier,price_per_gb_month,throughput_price_per_mb_s_month
+aws,us-east-1,efs,standard,0.30,0.00
+azure,eastus,azure-files,premium,0.16,0.00
+gcp,us-central1,filestore,standard,0.20,0.00

@@ -1,0 +1,8 @@
+provider,region,storage_type,price_per_gb_month,iops_included,iops_price_per_iops_month
+aws,us-east-1,ebs-gp3,0.08,3000,0.065
+aws,eu-west-1,ebs-gp3,0.088,3000,0.072
+aws,ap-south-1,ebs-gp3,0.096,3000,0.078
+azure,eastus,managed-premium-ssd,0.12,0,0.0
+azure,westeurope,managed-premium-ssd,0.13,0,0.0
+gcp,us-central1,pd-ssd,0.17,0,0.0
+gcp,asia-south1,pd-ssd,0.19,0,0.0
